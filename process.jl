@@ -86,7 +86,7 @@ function process_generator_costs!(network)
 end
 
 function main_texas7k()
-    network = PowerModels.parse_matpower(joinpath(@__DIR__, "data", "Texas7k_20210804.m"))
+    network = PowerModels.parse_matpower(joinpath(@__DIR__, "data", "texas7k_TAMU_20210804.m"))
     process_generator_costs!(network)
 
     # Get active/reactive load time series
@@ -161,11 +161,18 @@ if abspath(PROGRAM_FILE) == @__FILE__
     months = month.(dts)
     for mm in 1:12
         Ts = (months .== mm)
-        h5open(joinpath(@__DIR__, "data", @sprintf("load_2020-%02d.h5", mm)), "w") do fid
+        h5open(joinpath(@__DIR__, "data", @sprintf("texas7k_demand_2020-%02d.h5", mm)), "w") do fid
             fid["datetime"] = demand_data["datetime"][Ts]
             fid["pd"] = demand_data["pd"][Ts, :]
             fid["qd"] = demand_data["qd"][Ts, :]
         end
+    end
+    # Also export a single h5 file (for local use)
+    println("Exporting load data (consolidate H5 file)")
+    h5open(joinpath(@__DIR__, "data", "texas7k_demand_2020.h5"), "w") do fid
+        fid["datetime"] = demand_data["datetime"]
+        fid["pd"] = demand_data["pd"]
+        fid["qd"] = demand_data["qd"]
     end
 
     exit(0)
