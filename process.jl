@@ -151,7 +151,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     # Save network to JSON
     println("Exporting network data (JSON format)")
-    open(joinpath(@__DIR__, "data", "Texas7k.json"), "w") do io
+    open(joinpath(@__DIR__, "data", "texas7k_case.json"), "w") do io
         JSON.print(io, network_basic)
     end
 
