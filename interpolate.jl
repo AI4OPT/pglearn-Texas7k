@@ -90,7 +90,7 @@ end
 Load the Texas7k 2020 demand time series data.
 
 Returns a Dictionary with the following keys
-* `datetime::Vector{String}`
+* `datetime::Vector{String}`: Hourly time stamps
 * `pd::Matrix{Float32}`: a 8760×4549 Matrix of hourly nodal active power demand
 * `qd::Matrix{Float32}`: a 8760×4549 Matrix of hourly nodal reactive power demand
 """
@@ -103,66 +103,83 @@ function load_texas7k_demand_2020()
 end
 
 """
-    interpolate_to_5min(D)
+    interpolate_demand(D; time_period=Minute(5))
 
-Interpolate active and reactive demand from hourly to 5-minute granularity.
+Interpolate active and reactive demand from hourly to `time_period` granularity.
 The interpolation is done using cubic splines.
 
 # Arguments
 * `D::Dict`: dictionary containing 3 keys:
-    * `datetime`
+    * `datetime`: A vector of size `T` containing hourly time stamps.
+        Assumed to be sorted and contiguous (i.e., no missing values)
     * `D["pd"]` is a Matrix{Float32} of size `T*L`, such that 
         D["pd"][t, i] is the active demand of load `i` at time step `t`.
     * `D["qd"]` is a Matrix{Float32} of size `T*L`, such that 
         D["qd"][t, i] is the active demand of load `i` at time step `t`.
+* `time_period::TimePeriod`: the time period to use for interpolation.
+    Must be an integer divider of one hour (e.g. 15min, 5min, 30s)
 
 # Returns
 * A dictionary with same keys as `D`, but with 5-min interpolated data
 """
-function interpolate_to_5min(D)
-    # Hourly data info
-    dts_1hr = DateTime.(D["datetime"])
-    T_1hr = length(dts_1hr)
-    pd_1hr = D["pd"]
-    qd_1hr = D["qd"]
-    L = size(pd_1hr, 2)  # number of loads
+function interpolate_demand(D; time_period::TimePeriod=Minute(5))
+    # Ensure that time period is a divider of 1hr
+    if !isinteger(Hour(1) / time_period)
+        error(
+            """Invalid time period for interpolation: $(time_period).
+            Acceptable time periods must be an integer divider of 1 hour.
+            For instance:
+            * ✅: 30min, 15min, 30s
+            * ❌: 2hr, 7min, 43s"""
+        )
+    end
 
-    dts_5min = collect(minimum(dts_1hr):Minute(5):maximum(dts_1hr))
-    # The interpolation will create an additional 11 points per hour,
-    #   except for the last hour
-    T_5min = 12 * (T_1hr - 1) + 1
+    # Hourly data info
+    dts_hrly = DateTime.(D["datetime"])
+    (round.(dts_hrly, Hour(1)) == dts_hrly) || error("Raw time stamps must be on the hour")
+    T_hrly = length(dts_hrly)
+    pd_hrly = D["pd"]
+    qd_hrly = D["qd"]
+    L = size(pd_hrly, 2)  # number of loads
+
+    # All field with `_itp` suffix indicate interpolated data
+    dts_itp = collect(minimum(dts_hrly):time_period:maximum(dts_hrly))
+    T_itp = length(dts_itp)
     # pre-allocate interpolated active/reactive demand
-    pd_5min = zeros(Float32, T_5min, L)
-    qd_5min = zeros(Float32, T_5min, L)
+    pd_itp = zeros(Float32, T_itp, L)
+    qd_itp = zeros(Float32, T_itp, L)
 
     # Now we do the actual interpolation
-    for (x_1hr, x_5min) in zip([pd_1hr, qd_1hr], [pd_5min, qd_5min])
+    # For numerical stability of the interpolation step,
+    #   we define "1 unit of time" to be 1 hour.
+    delta_x = (time_period / Hour(1))
+    for (x_hrly, x_itp) in zip([pd_hrly, qd_hrly], [pd_itp, qd_itp])
         @threads for i in 1:L
-            local itp = cubic_spline_interpolation(1:T_1hr, x_1hr[:, i])
-            x_5min[:, i] .= itp.(collect(1:(1/12):T_1hr))
+            local itp = cubic_spline_interpolation(1:T_hrly, x_hrly[:, i])
+            x_itp[:, i] .= itp.(collect(1:delta_x:T_hrly))
         end
     end
 
-    D_5min = Dict(
-        "datetime" => string.(dts_5min),
-        "pd" => pd_5min,
-        "qd" => qd_5min,
+    D_itp = Dict(
+        "datetime" => string.(dts_itp),
+        "pd" => pd_itp,
+        "qd" => qd_itp,
     )
 
-    return D_5min
+    return D_itp
 end
 
 function main_interpolate()
     D = load_texas7k_demand_2020()
-    D_5min = interpolate_to_5min(D)
+    D_5min = interpolate_demand(D; time_period=Minute(5))
 
     # Save to h5 file
-    if !isdir(joinpath(@__DIR__, "data", "5min"))
-        @warn "Path `data/5min` does not exist; creating it"
-        mkpath(joinpath(@__DIR__, "data", "5min"))
+    if !isdir(joinpath(@__DIR__, "data", "interpolated"))
+        @warn "Path `data/interpolated` does not exist; creating it"
+        mkpath(joinpath(@__DIR__, "data", "interpolated"))
     end
 
-    h5open(joinpath(@__DIR__, "data", "5min", "texas7k_demand_2020_5min.h5"), "w") do fid
+    h5open(joinpath(@__DIR__, "data", "interpolated", "texas7k_demand_2020_5min.h5"), "w") do fid
         for (k, v) in D_5min
             fid[k] = v
         end
