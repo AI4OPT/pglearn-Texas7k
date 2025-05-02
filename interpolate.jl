@@ -76,7 +76,7 @@ function _load_texas7k_demand_2020_monthly()
     # All files exist, let's load them and consolidate into a single dictionary
     ds = [h5read(fpath, "/") for fpath in fpaths]
     D = Dict(
-        k => reduce(vcat([d[k] for d in ds]))
+        k => reduce(vcat, [d[k] for d in ds])
         for k in ["datetime", "pd", "qd"]
     )
 
